@@ -2,7 +2,7 @@
 #include <algorithm>
 #include <cmath>
 
-void histEqSerial(int *output, const int *input, int width, int height)
+void _histEqSerial(int *output, const int *input, int width, int height)
 {
     // Compute the histogram of the input image
     int histogram[256] = {0};

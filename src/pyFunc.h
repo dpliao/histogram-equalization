@@ -1,6 +1,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
 #include "histEqSerial.h"
+#include "histEqThread.h"
 
 namespace py = pybind11;
 
@@ -32,7 +33,7 @@ py::array_t<int> RGBtoYCbCr(py::array_t<int> input)
     return result;
 }
 
-py::array_t<int> histEq(py::array_t<int> input)
+py::array_t<int> histEq_serial(py::array_t<int> input)
 {
     py::buffer_info buf = input.request();
 
@@ -42,7 +43,28 @@ py::array_t<int> histEq(py::array_t<int> input)
     int *img = static_cast<int *>(buf.ptr);
     int size = buf.shape[0] * buf.shape[1];
     int *hist = new int[size];
-    histEqSerial(hist, img, size, 1);
+    _histEqSerial(hist, img, size, 1);
+
+    auto result = py::array_t<int>(size);
+    int *result_buf = static_cast<int *>(result.request().ptr);
+    for (int idx = 0; idx < size; idx++)
+        result_buf[idx] = hist[idx];
+
+    result.resize({buf.shape[0], buf.shape[1]});
+    return result;
+}
+
+py::array_t<int> histEq_thread(py::array_t<int> input)
+{
+    py::buffer_info buf = input.request();
+
+    if (buf.ndim != 2)
+        throw std::runtime_error("Number of dimensions must be 2");
+
+    int *img = static_cast<int *>(buf.ptr);
+    int size = buf.shape[0] * buf.shape[1];
+    int *hist = new int[size];
+    _histEqThread(hist, img, size, 1);
 
     auto result = py::array_t<int>(size);
     int *result_buf = static_cast<int *>(result.request().ptr);
@@ -81,70 +103,49 @@ py::array_t<int> YCbCrtoRGB(py::array_t<int> input)
     return result;
 }
 
-// py::array_t<int> bilateralFilter(py::array_t<int> input, int kernel_size, double sigma_d, double sigma_r)
-// {
-//     py::buffer_info input_buf = input.request();
-//     if (input_buf.ndim != 3)
-//         throw std::runtime_error("Number of dimensions must be 3");
+py::array_t<int> bilateralFilter(py::array_t<int> input, int kernelSize, double sigmaColor, double sigmaSpace)
+{
+    // Allocate memory for the result_ptr input
+    py::buffer_info input_buf = input.request();
+    int width = input_buf.shape[0], height = input_buf.shape[1], channel = input_buf.shape[2];
+    int *input_ptr = static_cast<int *>(input_buf.ptr);
 
-//     int width = input_buf.shape[0], height = input_buf.shape[1], channels = input_buf.shape[2];
-//     int *image = static_cast<int *>(input_buf.ptr);
+    auto output = py::array_t<int>(width * height * channel);
+    py::buffer_info result_buf = output.request();
+    int *result_ptr = static_cast<int *>(result_buf.ptr);
 
-//     auto result = py::array_t<int>(width * height * channels);
-//     py::buffer_info result_buf = result.request();
-//     int *output = static_cast<int *>(result_buf.ptr);
+    // Apply the bilateral filter
+    for (int c = 0; c < channel; c++)
+    {
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                // Compute the spatial and range weights
+                double ws = 0, wr = 0, w = 0;
+                // Determine the kernel limits
+                int xMin = std::max(0, x - kernelSize);
+                int xMax = std::min(width - 1, x + kernelSize);
+                int yMin = std::max(0, y - kernelSize);
+                int yMax = std::min(height - 1, y + kernelSize);
+                // Iterate over the kernel
+                for (int yy = yMin; yy <= yMax; yy++)
+                {
+                    for (int xx = xMin; xx <= xMax; xx++)
+                    {
+                        int ds = (x - xx) * (x - xx) + (y - yy) * (y - yy);
+                        int dr = std::abs(input_ptr[(xx * height + yy) * channel + c] - input_ptr[(x * height + y) * channel + c]);
+                        ws += std::exp(-ds / (2 * sigmaSpace * sigmaSpace));
+                        wr += std::exp(-dr * dr / (2 * sigmaColor * sigmaColor));
+                        w += input_ptr[(xx * height + yy) * channel + c] * ws * wr;
+                    }
+                }
+                // Compute the result_ptr value
+                result_ptr[(x * height + y) * channel + c] = (int)(w / (ws * wr));
+            }
+        }
+    }
 
-//     // Make sure the kernel size is odd
-//     if (kernel_size % 2 == 0)
-//         kernel_size++;
-
-//     // Clamp the kernel size to the maximum allowed
-//     kernel_size = std::min(kernel_size, MAX_KERNEL_SIZE);
-
-//     // Half of the kernel size
-//     int half_size = kernel_size / 2;
-
-//     // For each pixel in the image
-//     for (int y = 0; y < height; y++)
-//     {
-//         for (int x = 0; x < width; x++)
-//         {
-//             // For each channel (e.g. red, green, blue)
-//             for (int c = 0; c < channels; c++)
-//             {
-//                 double sum = 0;
-//                 double weight_sum = 0;
-
-//                 // For each pixel in the kernel
-//                 for (int j = -half_size; j <= half_size; j++)
-//                 {
-//                     for (int i = -half_size; i <= half_size; i++)
-//                     {
-//                         // Calculate the indices of the current pixel in the kernel
-//                         int x_pos = x + i;
-//                         int y_pos = y + j;
-
-//                         // Make sure the pixel is within the bounds of the image
-//                         if (x_pos >= 0 && x_pos < width && y_pos >= 0 && y_pos < height)
-//                         {
-//                             // Calculate the weight for this pixel
-//                             double w = weight(i, j, sigma_d, sigma_r);
-
-//                             // Get the intensity of the current pixel
-//                             int intensity = image[y_pos * width * channels + x_pos * channels + c];
-
-//                             // Add the intensity and weight to the sums
-//                             sum += intensity * w;
-//                             weight_sum += w;
-//                         }
-//                     }
-//                 }
-//                 // Set the output pixel to the weighted average intensity
-//                 output[y * width * channels + x * channels + c] = (int)sum;
-//             }
-//         }
-//     }
-
-//     result.resize({width, height, channels});
-//     return result;
-// }
+    output.resize({width, height, channel});
+    return output;
+}

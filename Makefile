@@ -1,14 +1,23 @@
 CXX = g++
-CFLAGS = -shared -std=c++17 -O3 -Wall -fPIC
-PWD = $(shell pwd)
+CFLAGS = -shared -std=c++17 -O3 -Wall -fPIC $(shell python3 -m pybind11 --includes) $(shell python3-config --includes)
 
-SRC = wrapper.cpp
-TARGET = myHist
+SRCDIR = src
+SRC = wrapper.cpp $(SRCDIR)/pyFunc.h $(SRCDIR)/histEqSerial.h
 
-LIBS = -I/usr/include/python3.8 -I/usr/include/pybind11 -lpython3.8 -L/usr/include/mkl/intel64 -I/usr/include/mkl/ -lmkl_rt -lpthread -lm -ldl -lblas
+OBJDIR = obj
+OBJ = $(OBJDIR)/wrapper.o
+EXE = myHist$(shell python3-config --extension-suffix)
 
-$(TARGET):
-	$(CXX) $(CFLAGS) `python3 -m pybind11 --includes` $(SRC) -o $(TARGET)`python3-config --extension-suffix` `python3-config --ldflags` $(LIBS)
+all: dirs $(EXE)
+
+dirs:
+	mkdir -p $(OBJDIR)
+
+$(EXE): $(OBJ)
+	$(CXX) $(CFLAGS) $(SRC) -o $(EXE)
+
+$(OBJ): $(SRC)
+	$(CXX) $(CFLAGS) -c $(SRC) -o $(OBJ)
 
 .PHONY: test clean
 
@@ -16,4 +25,4 @@ test: $(TARGET)
 	python3 -m pytest
 
 clean:
-	rm -rf *.so __pycache__ .pytest_cache
+	rm -rf *.so __pycache__ .pytest_cache $(OBJDIR)

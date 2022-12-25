@@ -32,4 +32,4 @@
 *.app
 
 # Other files
-output_*.jpg
+/output
